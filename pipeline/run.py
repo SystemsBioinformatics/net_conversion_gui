@@ -66,7 +66,7 @@ def build_and_check(df_metabolites, df_reactions, config):
         df_metabolites, df_reactions, config.get("MODEL_NAME", "model"))
     removed = model_mod.configure_exchanges(
         model, config.get("SUBSTRATES"), config.get("PRODUCTS"),
-        config.get("REV_ALLOWED"))
+        config.get("REV_ALLOWED"), config.get("ENERGY_PRODUCT"))
 
     atp_obj, atp_fluxes = model_mod.check_atp_without_substrate(
         model, config["ENERGY_PRODUCT"], config.get("SUBSTRATES", []))

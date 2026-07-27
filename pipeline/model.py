@@ -48,24 +48,27 @@ def build_model(df_metabolites, df_reactions, model_name="model"):
     return model, irreversible
 
 
-def configure_exchanges(model, substrates, products, rev_allowed):
+def configure_exchanges(model, substrates, products, rev_allowed, energy_product=None):
     """Restrict/remove exchange reactions per the substrate/product/rev sets.
 
     Exchanges not in ``rev_allowed``/``substrates`` lose uptake (lb=0); those in
-    none of the three sets are removed entirely.  Returns the list of removed
-    reaction ids.
+    none of the three sets (and not ``energy_product``) are removed entirely.
+    ``energy_product``'s exchange is always kept regardless of set membership —
+    ``check_atp_without_substrate`` needs it to still exist even if the user
+    hasn't also flagged it as a product or rev-allowed. Returns the list of
+    removed reaction ids.
     """
     substrates = set(substrates or [])
     products = set(products or [])
     rev_allowed = set(rev_allowed or [])
+    keep = substrates | products | rev_allowed | ({energy_product} if energy_product else set())
     removed = []
     for r in list(model.reactions):
         if not r.id.startswith("EX"):
             continue
         if r.id not in rev_allowed and r.id not in substrates:
             r.lower_bound = 0
-        if (r.id not in products and r.id not in substrates
-                and r.id not in rev_allowed):
+        if r.id not in keep:
             model.remove_reactions([r])
             removed.append(r.id)
     return removed
