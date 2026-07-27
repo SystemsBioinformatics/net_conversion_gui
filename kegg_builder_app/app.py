@@ -419,7 +419,36 @@ app.layout = dbc.Container([
            "Exchange reactions (EX…) are expected to be unbalanced and are not "
            "flagged. Use the one-click fixes to patch a flagged reaction.",
            className="text-muted small"),
-    dcc.Loading(html.Div(id="balance-panel")),
+    dcc.Loading(html.Div(id="balance-banner")),
+    html.P("Edit the \"Equation (working ids)\" column directly to fix an "
+           "imbalance — press Enter to save, which writes the change back "
+           "into the Reactions table above.", className="text-muted small"),
+    dash_table.DataTable(
+        id="balance-tbl",
+        columns=[
+            {"name": "Reaction", "id": "Reaction", "editable": False},
+            {"name": "Status", "id": "Status", "editable": False},
+            {"name": "Equation (working ids)", "id": "Equation (working ids)",
+             "editable": True},
+            {"name": "KEGG equation", "id": "KEGG equation", "editable": False},
+        ],
+        data=[],
+        editable=True,
+        page_size=100,
+        style_cell={"fontFamily": "monospace", "fontSize": "12px",
+                    "textAlign": "left", "padding": "4px"},
+        style_data_conditional=[
+            {"if": {"filter_query": '{Status} contains "✗"'},
+             "backgroundColor": "#f8d7da"},
+            {"if": {"filter_query": '{Status} contains "⚠"'},
+             "backgroundColor": "#fff3cd"},
+            {"if": {"filter_query": '{Status} contains "✓"'},
+             "backgroundColor": "#d4edda"},
+            {"if": {"column_id": "Equation (working ids)"},
+             "backgroundColor": "#f0f7ff"},
+        ],
+        style_table={"overflowX": "auto", "maxHeight": "360px", "overflowY": "auto"},
+    ),
     dbc.Card(dbc.CardBody([
         html.H6("One-click fixes", className="mb-2"),
         dbc.InputGroup([
@@ -1080,7 +1109,8 @@ def check_connectivity(_n, met_data, rxn_data):
 
 
 @app.callback(
-    Output("balance-panel", "children"),
+    Output("balance-banner", "children"),
+    Output("balance-tbl", "data"),
     Output("fix-reaction", "options"),
     Output("fix-reaction", "value"),
     Input("tbl-met", "data"),
@@ -1091,7 +1121,8 @@ def update_balance(met_data, rxn_data, fix_value):
     df_met = records_to_df(met_data, io.METABOLITE_COLS)
     df_rxn = records_to_df(rxn_data, io.REACTION_COLS)
     if df_rxn.empty or df_rxn["ID"].dropna().empty:
-        return html.Div("No reactions yet — fetch some from KEGG above."), [], None
+        return (html.Div("No reactions yet — fetch some from KEGG above."),
+                [], [], None)
 
     df_bal, ok, errors = run.run_balance(df_met, df_rxn)
 
@@ -1110,22 +1141,6 @@ def update_balance(met_data, rxn_data, fix_value):
         "Equation (working ids)": df_bal["equation_custom"],
         "KEGG equation": df_bal["equation_kegg"],
     })
-    table = dash_table.DataTable(
-        data=disp.to_dict("records"),
-        columns=[{"name": c, "id": c} for c in disp.columns],
-        style_cell={"fontFamily": "monospace", "fontSize": "12px",
-                    "textAlign": "left", "padding": "4px"},
-        style_data_conditional=[
-            {"if": {"filter_query": '{Status} contains "✗"'},
-             "backgroundColor": "#f8d7da"},
-            {"if": {"filter_query": '{Status} contains "⚠"'},
-             "backgroundColor": "#fff3cd"},
-            {"if": {"filter_query": '{Status} contains "✓"'},
-             "backgroundColor": "#d4edda"},
-        ],
-        page_size=100,
-        style_table={"overflowX": "auto", "maxHeight": "360px", "overflowY": "auto"},
-    )
     if ok:
         banner = dbc.Alert("✓ All non-exchange reactions are atom- and "
                            "charge-balanced — ready to download.", color="success")
@@ -1142,7 +1157,42 @@ def update_balance(met_data, rxn_data, fix_value):
     flagged_ids = [e["reaction_id"] for e in errors]
     fix_val = fix_value if fix_value in flagged_ids else (
         flagged_ids[0] if flagged_ids else None)
-    return html.Div([banner, table]), flagged, fix_val
+    return banner, disp.to_dict("records"), flagged, fix_val
+
+
+@app.callback(
+    Output("tbl-rxn", "data", allow_duplicate=True),
+    Input("balance-tbl", "data"),
+    State("tbl-rxn", "data"),
+    prevent_initial_call=True,
+)
+def apply_balance_edits(balance_data, rxn_data):
+    # Writes edits made in the "Equation (working ids)" column of the balance
+    # table back into the Reactions table. Guarded by an equality check
+    # (below) so that round-tripping an unchanged value through
+    # update_balance -> balance-tbl -> here doesn't loop forever.
+    if not balance_data:
+        return no_update
+    df_rxn = records_to_df(rxn_data, io.REACTION_COLS)
+    changed = False
+    for row in balance_data:
+        rid = row.get("Reaction")
+        if rid is None:
+            continue
+        mask = df_rxn["ID"].astype(str) == str(rid)
+        if not mask.any():
+            continue
+        idx = df_rxn.index[mask][0]
+        current = df_rxn.loc[idx, "Reaction stoichiometry"]
+        current_str = "" if pd.isna(current) else str(current)
+        new_eq = row.get("Equation (working ids)")
+        new_str = "" if new_eq is None else str(new_eq)
+        if current_str != new_str:
+            df_rxn.loc[idx, "Reaction stoichiometry"] = new_eq
+            changed = True
+    if not changed:
+        return no_update
+    return df_to_records(df_rxn)
 
 
 @app.callback(
