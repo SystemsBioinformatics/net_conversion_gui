@@ -44,13 +44,14 @@ def records_to_df(records, cols):
     return df[cols]
 
 
-def _table(table_id, columns, data=None):
+def _table(table_id, columns, data=None, row_selectable=False):
     return dash_table.DataTable(
         id=table_id,
         columns=[{"name": c, "id": c} for c in columns],
         data=data or [],
         editable=True,
         row_deletable=True,
+        row_selectable=row_selectable,
         page_size=100,
         style_table={"overflowX": "auto", "maxHeight": "360px", "overflowY": "auto"},
         style_cell={"fontFamily": "monospace", "fontSize": "13px",
@@ -328,9 +329,11 @@ app.layout = dbc.Container([
             dbc.Button("+ Add reaction row", id="btn-add-rxn", size="sm",
                        color="light", className="mb-1"),
             html.Div("Press Enter after editing a cell to save it — clicking "
-                     "away without Enter does not save.",
+                     "away without Enter does not save. Tick the checkbox on "
+                     "the left of a row to mark that reaction reversible "
+                     "(mirrors the Reversibility column).",
                      className="text-muted small mb-1"),
-            _table("tbl-rxn", io.REACTION_COLS),
+            _table("tbl-rxn", io.REACTION_COLS, row_selectable="multi"),
         ], md=7),
         dbc.Col([
             html.H5("Metabolites"),
@@ -365,9 +368,10 @@ app.layout = dbc.Container([
         html.H5("Reaction reversibility"),
         html.P("New reactions default to irreversible — reversibility is a "
                "deliberate modelling choice (CLAUDE.md §5), never a silent "
-               "default. Pick the reactions that are actually reversible and "
-               "mark them here; check the Reversibility column in the "
-               "Reactions table above to see the current state.",
+               "default. Tick the checkbox to the left of a reaction's ID in "
+               "the table above to mark it reversible, or select several "
+               "reactions and use the buttons below — both stay in sync "
+               "with the Reversibility column.",
                className="text-muted small"),
         dcc.Dropdown(id="reversible-rxns", multi=True, className="mb-2",
                      placeholder="Reactions to mark…"),
@@ -385,9 +389,11 @@ app.layout = dbc.Container([
         html.H5("1e · Exchange & transport reactions"),
         html.P("Pick the metabolites that cross the system boundary. For each, "
                "the app adds an extracellular counterpart, a transport reaction "
-               "(X ⇌ Xex) and an exchange reaction (EXX). Direction stays a "
-               "modelling choice — everything is created reversible; set "
-               "substrates/products later in the analysis app.",
+               "(X → Xex) and an exchange reaction (Xex →), both created "
+               "irreversible — export/secretion only, as written. If a "
+               "metabolite is actually taken up (a substrate), tick its "
+               "reversibility checkbox in the Reactions table below (1f's "
+               "connectivity check will flag it as blocked otherwise).",
                className="text-muted small"),
         dcc.Dropdown(id="exchange-mets", multi=True, className="mb-2",
                      placeholder="Select boundary metabolites…"),
@@ -408,6 +414,23 @@ app.layout = dbc.Container([
                "transport reactions: a blocked exchange usually means a "
                "missing transport or connecting reaction for that boundary "
                "metabolite.", className="text-muted small"),
+        dbc.Alert([
+            html.B("Tips"),
+            html.Ul([
+                html.Li("Make sure most of the reactions in the list can be "
+                        "active. Check whether the exchange reactions for "
+                        "the expected substrates and products are not "
+                        "blocked."),
+                html.Li("If most of the reactions are blocked, check the "
+                        "reversibility settings of the reactions. The "
+                        "reactions from KEGG can be in the opposite "
+                        "direction than they occur in the pathway. Walk "
+                        "through the pathway and see if a metabolite is "
+                        "both produced and consumed. (Make the reaction "
+                        "that does not currently run in the expected "
+                        "direction reversible)."),
+            ], className="mb-0"),
+        ], color="info", className="mb-2"),
         dbc.Button("Check for blocked reactions", id="btn-connectivity",
                    color="secondary", outline=True),
         dcc.Loading(html.Div(id="connectivity-output", className="mt-2")),
@@ -1021,6 +1044,44 @@ def mark_reversibility(_n_rev, _n_irrev, selected, rxn_data):
     return (df_to_records(df_rxn),
             dbc.Alert(f"Marked {mask.sum()} reaction(s) {label}: "
                       f"{', '.join(sorted(selected))}.", color="success"))
+
+
+def _is_reversible(value):
+    try:
+        return int(float(value)) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+@app.callback(
+    Output("tbl-rxn", "data", allow_duplicate=True),
+    Output("tbl-rxn", "selected_rows"),
+    Input("tbl-rxn", "data"),
+    Input("tbl-rxn", "selected_rows"),
+    prevent_initial_call=True,
+)
+def sync_reversibility_checkboxes(rxn_data, selected_rows):
+    """Two-way bind the row-selection checkboxes to the Reversibility
+    column: ticking a row sets Reversibility=1, and any other change to the
+    Reversibility column (typed directly, the mark-reversible buttons, a
+    fresh KEGG fetch/upload) re-derives which boxes are ticked."""
+    rxn_data = rxn_data or []
+    selected_rows = selected_rows or []
+    trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+
+    if trigger == "tbl-rxn.selected_rows":
+        selected = set(selected_rows)
+        new_data = [{**row, "Reversibility": 1 if i in selected else 0}
+                    for i, row in enumerate(rxn_data)]
+        if new_data == rxn_data:
+            return no_update, no_update
+        return new_data, no_update
+
+    new_selected = [i for i, row in enumerate(rxn_data)
+                     if _is_reversible(row.get("Reversibility"))]
+    if new_selected == selected_rows:
+        return no_update, no_update
+    return no_update, new_selected
 
 
 @app.callback(

@@ -7,3 +7,18 @@
   input:not([type="radio"]):not([type="checkbox"]) {
     text-align: left !important;
 }
+
+/* Reactions table: label the row-selection checkboxes as what they actually
+   control — Reversibility — since the native DataTable header is blank. */
+#tbl-rxn th.dash-select-header,
+#tbl-rxn td.dash-select-cell {
+    width: 54px !important;
+    max-width: 54px !important;
+    min-width: 54px !important;
+}
+#tbl-rxn th.dash-select-header::after {
+    content: "Rev?";
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+}

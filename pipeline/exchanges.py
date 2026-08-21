@@ -11,7 +11,11 @@ any ``Example*.xlsx``):
 
 This module builds those rows in the two canonical dataframes.  Direction is a
 modelling choice made later (in the analysis app's SUBSTRATES/PRODUCTS/
-REV_ALLOWED selectors), so everything defaults to reversible here.
+REV_ALLOWED selectors) — but, like every other reaction (CLAUDE.md §5),
+reversibility is never a silent default, so these rows are created
+irreversible, as written (``X -> {X}ex`` / ``{X}ex -> `` — i.e. export only).
+The user flips the ones that need to run the other way (e.g. substrate uptake)
+using the checkbox in the Reactions table, guided by the 1f connectivity check.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from .io import METABOLITE_COLS, REACTION_COLS
 
 
 def add_exchange_transport(df_metabolites, df_reactions, metabolite_ids,
-                           reversible=True):
+                           reversible=False):
     """Add ``{X}ex`` metabolite + ``T{X}`` transport + ``EX{X}`` exchange rows.
 
     Parameters
@@ -30,7 +34,9 @@ def add_exchange_transport(df_metabolites, df_reactions, metabolite_ids,
     metabolite_ids : iterable of str
         Working ids of the (intracellular) boundary metabolites.
     reversible : bool
-        Reversibility for the created transport/exchange rows (default True).
+        Reversibility for the created transport/exchange rows (default
+        False — irreversible, as written, i.e. export/secretion only; flip
+        the ones that need to run the other way, e.g. substrate uptake).
 
     Returns ``(df_met, df_rxn, messages)``.  Existing rows are never duplicated.
     """
