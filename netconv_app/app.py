@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import io as _io
 import os
+import sys
 import tempfile
 
 import dash
@@ -48,7 +49,16 @@ EXAMPLES = {
     "EMP glycolysis → lactate (default)": "Example1_EMP_lactate.xlsx",
     "EMP glycolysis → ethanol/acetate/formate": "Example1_EMPglycolysis.xlsx",
     "Pan-glycolysis (24 EFMs)": "pan_glycolysis.xlsx",
-    "1,4-butanediol production (non-KEGG metabolite)": "BDO_production_pathways.xlsx",
+    "Multi-substrate & multi-product example network (~3000 EFMs)": "EFMexamples_8.xlsx",
+}
+
+# Expected EFM count per example, shown as a heads-up when it's loaded (purely
+# informational — the actual count always comes from running EFM enumeration).
+EXAMPLE_EFM_INFO = {
+    "Example1_EMP_lactate.xlsx": "1 EFM",
+    "Example1_EMPglycolysis.xlsx": "1 EFM",
+    "pan_glycolysis.xlsx": "24 EFMs",
+    "EFMexamples_8.xlsx": "~3000 EFMs — enumeration will take a while",
 }
 
 CURRENCY_KEGG = {"C00002": "ATP", "C00008": "ADP", "C00009": "Pi",
@@ -75,6 +85,15 @@ def load_example(filename):
     df_met, df_rxn = io.load_excel(path)
     config = io.load_config(path) or {}
     return df_met, df_rxn, config
+
+
+def _example_loaded_status(filename):
+    msg = f"Loaded {filename}."
+    expected = EXAMPLE_EFM_INFO.get(filename)
+    if expected:
+        msg += f" Expected: {expected}."
+    return dbc.Alert(msg, color="info", className="mb-0 py-1 px-2",
+                     style={"fontSize": "12px"})
 
 
 # --------------------------------------------------------------------------- #
@@ -426,25 +445,43 @@ def _startup_banner():
     return "JVM detected ✓  — ready for EFM enumeration."
 
 
-app.layout = dbc.Container([
-    dcc.Store(id="store-metabolites"),
-    dcc.Store(id="store-reactions"),
-    dcc.Store(id="store-efm"),       # serialized normalized EFM table + meta
-    dcc.Store(id="store-thermo"),    # serialized thermo results
+# Background callbacks (Dash's DiskcacheManager, which uses the third-party
+# `multiprocess` package, and efmtool's own internal stdlib
+# multiprocessing.Manager()/Process — see pipeline/efm.py) each spawn a
+# worker process that re-imports this module as __main__ on Windows. Those
+# workers never serve a page; they only need `app` and the decorated
+# callbacks to exist so Dash/efmtool can locate the target function. Skip
+# rebuilding the real layout (which reads an example Excel file and
+# constructs the full component tree) for any such worker, so a slow EFM run
+# doesn't stack up multiple concurrent heavy re-imports and starve Windows of
+# handles (WinError 1450). Both multiprocessing and its `multiprocess` fork
+# tag spawned children with the same "--multiprocessing-fork" argv flag, so
+# checking sys.argv catches every level of nesting regardless of which of
+# the two libraries did the spawning.
+_IS_BACKGROUND_WORKER = any(a.startswith("--multiprocessing-fork") for a in sys.argv)
 
-    html.H3("Catabolic net conversions, EFMs & ΔG", className="mt-3"),
-    html.P("A computational tool: assemble a pathway, check balance, enumerate "
-           "elementary flux modes, and compute net-conversion ΔG°′/ΔGm′ and the "
-           "Ω measure (kJ/mol).", className="text-muted"),
-    dbc.Tabs([
-        dbc.Tab(workbench_tab(), label="① Workbench", tab_id="tab-workbench"),
-        dbc.Tab(sanity_tab(), label="② Sanity checks", tab_id="tab-fba"),
-        dbc.Tab(efm_tab(), label="③ EFMs", tab_id="tab-efm"),
-        dbc.Tab(thermo_tab(), label="④ Net conversions & ΔG", tab_id="tab-thermo"),
-        dbc.Tab(downloads_tab(), label="⑤ Downloads", tab_id="tab-downloads"),
-    ], id="main-tabs", active_tab="tab-workbench"),
-    html.Footer(html.Small(_startup_banner()), className="text-muted my-3"),
-], fluid=True)
+if not _IS_BACKGROUND_WORKER:
+    app.layout = dbc.Container([
+        dcc.Store(id="store-metabolites"),
+        dcc.Store(id="store-reactions"),
+        dcc.Store(id="store-efm"),       # serialized normalized EFM table + meta
+        dcc.Store(id="store-thermo"),    # serialized thermo results
+
+        html.H3("Catabolic net conversions, EFMs & ΔG", className="mt-3"),
+        html.P("A computational tool: assemble a pathway, check balance, enumerate "
+               "elementary flux modes, and compute net-conversion ΔG°′/ΔGm′ and the "
+               "Ω measure (kJ/mol).", className="text-muted"),
+        dbc.Tabs([
+            dbc.Tab(workbench_tab(), label="① Workbench", tab_id="tab-workbench"),
+            dbc.Tab(sanity_tab(), label="② Sanity checks", tab_id="tab-fba"),
+            dbc.Tab(efm_tab(), label="③ EFMs", tab_id="tab-efm"),
+            dbc.Tab(thermo_tab(), label="④ Net conversions & ΔG", tab_id="tab-thermo"),
+            dbc.Tab(downloads_tab(), label="⑤ Downloads", tab_id="tab-downloads"),
+        ], id="main-tabs", active_tab="tab-workbench"),
+        html.Footer(html.Small(_startup_banner()), className="text-muted my-3"),
+    ], fluid=True)
+else:
+    app.layout = html.Div()
 
 
 # --------------------------------------------------------------------------- #
@@ -477,13 +514,15 @@ def update_tables(_n_ex, upload, _n_arxn, _n_amet, example_file,
         df_met, df_rxn, cfg = load_example("Example1_EMP_lactate.xlsx")
         return (df_to_records(df_met), df_to_records(df_rxn),
                 df_to_records(df_met), df_to_records(df_rxn),
-                cfg.get("MODEL_NAME", "model"), "")
+                cfg.get("MODEL_NAME", "model"),
+                _example_loaded_status("Example1_EMP_lactate.xlsx"))
 
     if trig == "btn-load-example":
-        df_met, df_rxn, cfg = load_example(example_file or "Example1_EMP_lactate.xlsx")
+        fname = example_file or "Example1_EMP_lactate.xlsx"
+        df_met, df_rxn, cfg = load_example(fname)
         return (df_to_records(df_met), df_to_records(df_rxn),
                 df_to_records(df_met), df_to_records(df_rxn),
-                cfg.get("MODEL_NAME", model_name), f"Loaded {example_file}")
+                cfg.get("MODEL_NAME", model_name), _example_loaded_status(fname))
 
     if trig == "upload-excel" and upload:
         _header, b64 = upload.split(",", 1)
@@ -1041,11 +1080,11 @@ def run_fba(_n, met_data, rxn_data, name, subs, prods, carbon, energy, rev, pseu
                       "from nothing. It almost always means a reaction's "
                       "reversibility or direction is wrong. The reactions "
                       "carrying flux in this impossible cycle:",
-                      className="text-danger"),
+                      className="text-warning"),
             html.Pre(flux_lines, className="mt-2 small"),
         ])
     card1 = _check_card(
-        "pass" if atp_ok else "fail",
+        "pass" if atp_ok else "warn",
         "No free energy from nothing",
         f"With every substrate uptake switched off, the network should not be "
         f"able to make the energy carrier ({ename}). If it can, some reaction is "
@@ -1149,9 +1188,10 @@ def run_fba(_n, met_data, rxn_data, name, subs, prods, carbon, energy, rev, pseu
                 "first (see the connectivity check below).",
             ]), color="danger")
     elif not atp_ok:
-        banner = dbc.Alert("A problem was found that would corrupt the EFM "
-                           "results — fix it in the Workbench before continuing.",
-                           color="danger")
+        banner = dbc.Alert("An energy-generating cycle was found — check the "
+                           "reaction directions in the Workbench before "
+                           "continuing (see the check below).",
+                           color="warning")
     elif infeasible:
         banner = dbc.Alert("No blocking problems, but check the warnings below "
                            "before continuing.", color="warning")

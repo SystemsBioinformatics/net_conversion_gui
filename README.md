@@ -294,7 +294,7 @@ Flags: `--no-thermo` skips eQuilibrator (and its first-run download);
 | `netconv_app/examples/Example1_EMP_lactate.xlsx` | EMP glycolysis → lactate (the default; reproduces the paper's headline net conversion) |
 | `netconv_app/examples/Example1_EMPglycolysis.xlsx` | EMP glycolysis → ethanol / acetate / formate |
 | `netconv_app/examples/pan_glycolysis.xlsx` | Pan-glycolysis (2 imports × EMP/ED × GAPDH/GAPN × 3 fermentation routes) — the 24-EFM stretch test |
-| `netconv_app/examples/BDO_production_pathways.xlsx` | 1,4-butanediol production pathways — demonstrates a non-KEGG metabolite (`H4BUAL`) balanced via an explicit `Chemical formula` |
+| `netconv_app/examples/EFMexamples_8.xlsx` | Multi-substrate & multi-product example network — a large-EFM stress test (~3000 EFMs expected) |
 
 Regenerate them with:
 

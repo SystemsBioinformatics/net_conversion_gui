@@ -128,7 +128,12 @@ def prune_blocked(model):
 
     Returns the list of removed reaction ids.
     """
-    blocked = cobra.flux_analysis.find_blocked_reactions(model)
+    # processes=1 keeps this serial: COBRApy's FVA-based blocked-reaction
+    # check otherwise spawns a multiprocessing.Pool worker per CPU core, and
+    # on Windows each worker re-imports this whole app from scratch — cheap
+    # networks never notice, but it becomes a resource-exhaustion trap for
+    # anything running inside an already-spawned Dash background callback.
+    blocked = cobra.flux_analysis.find_blocked_reactions(model, processes=1)
     for rid in blocked:
         model.remove_reactions([model.reactions.get_by_id(rid)])
     return blocked
@@ -146,4 +151,4 @@ def find_blocked_reactions(df_metabolites, df_reactions, model_name="model"):
     """
     model, _irrev = build_model(df_metabolites, df_reactions, model_name)
     sanitize_model(model)
-    return cobra.flux_analysis.find_blocked_reactions(model)
+    return cobra.flux_analysis.find_blocked_reactions(model, processes=1)
