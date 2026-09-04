@@ -24,6 +24,9 @@ It is an *educational* tool: the intermediate dataframes are the point, so you
 can stop and fix the input between any two stages.
 
 ---
+## Tutorials
+
+Tutorials for the [net conversion app](https://youtu.be/W8H9xWoTbH8) and the [KEGG builder app](https://youtu.be/tg4OH1J9Va4) are available on YouTube.
 
 ## Quick start
 
